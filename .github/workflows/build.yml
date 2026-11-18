@@ -1,0 +1,310 @@
+name: Build APK
+on: workflow_dispatch
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+      - uses: android-actions/setup-android@v3
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: 8.7
+      - name: Create project files
+        run: |
+          mkdir -p app/src/main/java/com/example/btcwidget
+          mkdir -p app/src/main/res/layout app/src/main/res/drawable app/src/main/res/xml
+          cat > settings.gradle.kts <<'EOF'
+          pluginManagement {
+              repositories { google(); mavenCentral(); gradlePluginPortal() }
+          }
+          dependencyResolutionManagement {
+              repositories { google(); mavenCentral() }
+          }
+          rootProject.name = "BtcWidget"
+          include(":app")
+          EOF
+          cat > build.gradle.kts <<'EOF'
+          plugins {
+              id("com.android.application") version "8.5.2" apply false
+              id("org.jetbrains.kotlin.android") version "1.9.24" apply false
+          }
+          EOF
+          cat > gradle.properties <<'EOF'
+          org.gradle.jvmargs=-Xmx2g
+          EOF
+          cat > app/build.gradle.kts <<'EOF'
+          plugins {
+              id("com.android.application")
+              id("org.jetbrains.kotlin.android")
+          }
+          android {
+              namespace = "com.example.btcwidget"
+              compileSdk = 34
+              defaultConfig {
+                  applicationId = "com.example.btcwidget"
+                  minSdk = 24
+                  targetSdk = 34
+                  versionCode = 1
+                  versionName = "1.0"
+              }
+              compileOptions {
+                  sourceCompatibility = JavaVersion.VERSION_17
+                  targetCompatibility = JavaVersion.VERSION_17
+              }
+              kotlinOptions { jvmTarget = "17" }
+          }
+          EOF
+          cat > app/src/main/AndroidManifest.xml <<'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+              <uses-permission android:name="android.permission.INTERNET" />
+              <application android:label="BTC Widget" android:allowBackup="false">
+                  <activity android:name=".MainActivity" android:exported="true">
+                      <intent-filter>
+                          <action android:name="android.intent.action.MAIN" />
+                          <category android:name="android.intent.category.LAUNCHER" />
+                      </intent-filter>
+                  </activity>
+                  <receiver android:name=".BtcWidgetProvider" android:exported="true">
+                      <intent-filter>
+                          <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+                      </intent-filter>
+                      <meta-data android:name="android.appwidget.provider"
+                          android:resource="@xml/widget_info" />
+                  </receiver>
+              </application>
+          </manifest>
+          EOF
+          cat > app/src/main/res/xml/widget_info.xml <<'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
+              android:minWidth="250dp"
+              android:minHeight="130dp"
+              android:updatePeriodMillis="1800000"
+              android:initialLayout="@layout/widget_layout"
+              android:resizeMode="horizontal|vertical"
+              android:widgetCategory="home_screen" />
+          EOF
+          cat > app/src/main/res/drawable/widget_bg.xml <<'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <shape xmlns:android="http://schemas.android.com/apk/res/android">
+              <solid android:color="#B3FFFFFF" />
+              <corners android:radius="24dp" />
+          </shape>
+          EOF
+          cat > app/src/main/res/layout/widget_layout.xml <<'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+              android:id="@+id/root"
+              android:layout_width="match_parent"
+              android:layout_height="match_parent"
+              android:orientation="vertical"
+              android:gravity="center_horizontal"
+              android:padding="14dp"
+              android:background="@drawable/widget_bg">
+              <TextView
+                  android:id="@+id/label"
+                  android:layout_width="wrap_content"
+                  android:layout_height="wrap_content"
+                  android:text="BTC / USD · 24H"
+                  android:textColor="#000000"
+                  android:textSize="12sp"
+                  android:fontFamily="monospace" />
+              <TextView
+                  android:id="@+id/price"
+                  android:layout_width="wrap_content"
+                  android:layout_height="wrap_content"
+                  android:text="..."
+                  android:textColor="#000000"
+                  android:textSize="28sp"
+                  android:textStyle="bold"
+                  android:fontFamily="monospace" />
+              <TextView
+                  android:id="@+id/change"
+                  android:layout_width="wrap_content"
+                  android:layout_height="wrap_content"
+                  android:text=""
+                  android:textColor="#000000"
+                  android:textSize="14sp"
+                  android:fontFamily="monospace" />
+              <ImageView
+                  android:id="@+id/chart"
+                  android:layout_width="match_parent"
+                  android:layout_height="0dp"
+                  android:layout_weight="1"
+                  android:layout_marginTop="8dp"
+                  android:scaleType="fitXY" />
+          </LinearLayout>
+          EOF
+          cat > app/src/main/java/com/example/btcwidget/MainActivity.kt <<'EOF'
+          package com.example.btcwidget
+
+          import android.app.Activity
+          import android.os.Bundle
+          import android.widget.TextView
+
+          class MainActivity : Activity() {
+              override fun onCreate(savedInstanceState: Bundle?) {
+                  super.onCreate(savedInstanceState)
+                  val t = TextView(this)
+                  t.text = "BTC Widget встановлено.\n\nДодайте віджет на головний екран: утримайте порожнє місце, потім Віджети."
+                  t.setPadding(48, 96, 48, 48)
+                  t.textSize = 18f
+                  setContentView(t)
+              }
+          }
+          EOF
+          cat > app/src/main/java/com/example/btcwidget/BtcWidgetProvider.kt <<'EOF'
+          package com.example.btcwidget
+
+          import android.app.PendingIntent
+          import android.appwidget.AppWidgetManager
+          import android.appwidget.AppWidgetProvider
+          import android.content.ComponentName
+          import android.content.Context
+          import android.content.Intent
+          import android.graphics.Bitmap
+          import android.graphics.Canvas
+          import android.graphics.Color
+          import android.graphics.Paint
+          import android.graphics.Path
+          import android.widget.RemoteViews
+          import org.json.JSONArray
+          import org.json.JSONObject
+          import java.net.HttpURLConnection
+          import java.net.URL
+          import java.util.Locale
+          import kotlin.concurrent.thread
+
+          class BtcWidgetProvider : AppWidgetProvider() {
+
+              companion object {
+                  const val ACTION_REFRESH = "com.example.btcwidget.REFRESH"
+              }
+
+              override fun onReceive(context: Context, intent: Intent) {
+                  val a = intent.action
+                  if (a == AppWidgetManager.ACTION_APPWIDGET_UPDATE || a == ACTION_REFRESH) {
+                      val pending = goAsync()
+                      thread {
+                          try {
+                              update(context)
+                          } finally {
+                              pending.finish()
+                          }
+                      }
+                  } else {
+                      super.onReceive(context, intent)
+                  }
+              }
+
+              private fun update(context: Context) {
+                  val manager = AppWidgetManager.getInstance(context)
+                  val ids = manager.getAppWidgetIds(ComponentName(context, BtcWidgetProvider::class.java))
+                  if (ids.isEmpty()) return
+
+                  val views = RemoteViews(context.packageName, R.layout.widget_layout)
+                  val refresh = Intent(context, BtcWidgetProvider::class.java).setAction(ACTION_REFRESH)
+                  val pi = PendingIntent.getBroadcast(
+                      context, 0, refresh,
+                      PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+                  )
+                  views.setOnClickPendingIntent(R.id.root, pi)
+
+                  try {
+                      val prices = fetchPrices()
+                      val first = prices.first()
+                      val last = prices.last()
+                      val change = (last - first) / first * 100.0
+                      val arrow = if (change >= 0) "▲" else "▼"
+                      views.setTextViewText(R.id.price, String.format(Locale.US, "\$%,.2f", last))
+                      views.setTextViewText(
+                          R.id.change,
+                          String.format(Locale.US, "%s %.2f%%", arrow, Math.abs(change))
+                      )
+                      views.setImageViewBitmap(R.id.chart, drawChart(prices))
+                  } catch (e: Exception) {
+                      views.setTextViewText(R.id.price, "Немає даних")
+                      views.setTextViewText(R.id.change, "Торкніться, щоб оновити")
+                  }
+                  manager.updateAppWidget(ids, views)
+              }
+
+              private fun httpGet(url: String): String {
+                  val c = URL(url).openConnection() as HttpURLConnection
+                  c.connectTimeout = 10000
+                  c.readTimeout = 10000
+                  c.setRequestProperty("User-Agent", "Mozilla/5.0")
+                  try {
+                      return c.inputStream.bufferedReader().use { it.readText() }
+                  } finally {
+                      c.disconnect()
+                  }
+              }
+
+              private fun fetchPrices(): List<Double> {
+                  try {
+                      val json = JSONObject(
+                          httpGet("https://api.coingecko.com/api/v3/coins/bitcoin/market_chart?vs_currency=usd&days=1")
+                      )
+                      val arr = json.getJSONArray("prices")
+                      val list = ArrayList<Double>()
+                      for (i in 0 until arr.length()) {
+                          list.add(arr.getJSONArray(i).getDouble(1))
+                      }
+                      if (list.size > 2) return list
+                  } catch (e: Exception) {
+                  }
+                  val arr = JSONArray(
+                      httpGet("https://api.binance.com/api/v3/klines?symbol=BTCUSDT&interval=15m&limit=97")
+                  )
+                  val list = ArrayList<Double>()
+                  for (i in 0 until arr.length()) {
+                      list.add(arr.getJSONArray(i).getString(4).toDouble())
+                  }
+                  return list
+              }
+
+              private fun drawChart(values: List<Double>): Bitmap {
+                  val w = 720
+                  val h = 160
+                  val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+                  val canvas = Canvas(bmp)
+                  val paint = Paint(Paint.ANTI_ALIAS_FLAG)
+                  paint.color = Color.BLACK
+                  paint.style = Paint.Style.STROKE
+                  paint.strokeWidth = 6f
+                  paint.strokeJoin = Paint.Join.ROUND
+                  paint.strokeCap = Paint.Cap.ROUND
+
+                  val step = maxOf(1, values.size / 72)
+                  val pts = values.filterIndexed { i, _ -> i % step == 0 }
+                  val min = pts.minOrNull()!!
+                  val max = pts.maxOrNull()!!
+                  val range = if (max - min < 1e-9) 1.0 else max - min
+                  val wf = w.toDouble()
+                  val hf = h.toDouble()
+                  val pad = 8.0
+                  val n = (pts.size - 1).coerceAtLeast(1)
+
+                  val path = Path()
+                  pts.forEachIndexed { i, v ->
+                      val x = (pad + (wf - 2 * pad) * i / n).toFloat()
+                      val y = (hf - pad - (hf - 2 * pad) * (v - min) / range).toFloat()
+                      if (i == 0) path.moveTo(x, y) else path.lineTo(x, y)
+                  }
+                  canvas.drawPath(path, paint)
+                  return bmp
+              }
+          }
+          EOF
+      - name: Build
+        run: gradle assembleDebug --no-daemon
+      - uses: actions/upload-artifact@v4
+        with:
+          name: app-debug
+          path: app/build/outputs/apk/debug/app-debug.apk
